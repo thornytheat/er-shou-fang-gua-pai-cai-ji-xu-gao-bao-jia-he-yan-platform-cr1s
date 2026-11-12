@@ -1,0 +1,52 @@
+[
+  {
+    "code": "lianjia_agg",
+    "name": "链家式聚合站",
+    "platform": "aggregator",
+    "base_url": "https://hz.lianjia-like.example.com/ershoufang",
+    "frequency": "daily 08:30",
+    "rate_limit_per_min": 60,
+    "page_size": 10,
+    "note": "研究组主力源：字段最规整，单价/总价/精确楼层都有"
+  },
+  {
+    "code": "anjuke_portal",
+    "name": "安居式信息港",
+    "platform": "portal",
+    "base_url": "https://hz.anjuke-like.example.com/sale",
+    "frequency": "daily 08:40",
+    "rate_limit_per_min": 45,
+    "page_size": 10,
+    "note": "信息港：楼层只给「中楼层(共18层)」，需要补层号"
+  },
+  {
+    "code": "owner_bbs",
+    "name": "业主论坛",
+    "platform": "forum",
+    "base_url": "https://bbs.hz-owner.example.cn/forum-68",
+    "frequency": "daily 09:10",
+    "rate_limit_per_min": 30,
+    "page_size": 10,
+    "note": "业主直售口吻，日期是中文写法，没有联系方式字段"
+  },
+  {
+    "code": "agent_moments",
+    "name": "中介朋友圈存档",
+    "platform": "moments",
+    "base_url": "https://archive.hz-agent.example.com/moments/2026-11",
+    "frequency": "twice_daily 08:30/20:30",
+    "rate_limit_per_min": 20,
+    "page_size": 10,
+    "note": "门店朋友圈截图转录，标题带表情词，单价常有小幅上调"
+  },
+  {
+    "code": "store_notice",
+    "name": "门店群公告",
+    "platform": "notice",
+    "base_url": "https://notice.hz-store.example.com/rentlens",
+    "frequency": "hourly 08:00-21:00",
+    "rate_limit_per_min": 90,
+    "page_size": 10,
+    "note": "门店群公告，一行一条，日期只有 MM-DD"
+  }
+]

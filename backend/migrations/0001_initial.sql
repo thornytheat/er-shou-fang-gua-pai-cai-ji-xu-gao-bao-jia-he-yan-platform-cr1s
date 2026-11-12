@@ -1,0 +1,180 @@
+-- rentlens 初始结构（MySQL 8.0）
+-- 运行时由 SQLAlchemy Base.metadata.create_all 建表；此文件是等价 DDL，
+-- 供 DBA 走迁移流程 / 预审索引用，字段与 src/models 一一对应。
+
+CREATE TABLE IF NOT EXISTS users (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  email         VARCHAR(160) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  display_name  VARCHAR(80)  NOT NULL,
+  role          VARCHAR(20)  NOT NULL,
+  team          VARCHAR(80)  NOT NULL DEFAULT '安家数据 · 楼盘研究组',
+  created_at    DATETIME     NOT NULL,
+  UNIQUE KEY uq_users_email (email),
+  KEY ix_users_role (role)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS sources (
+  id                 INT AUTO_INCREMENT PRIMARY KEY,
+  code               VARCHAR(40)  NOT NULL,
+  name               VARCHAR(80)  NOT NULL,
+  platform           VARCHAR(20)  NOT NULL,
+  base_url           VARCHAR(255) NOT NULL,
+  frequency          VARCHAR(40)  NOT NULL,
+  rate_limit_per_min INT NOT NULL DEFAULT 30,
+  page_size          INT NOT NULL DEFAULT 10,
+  enabled            TINYINT(1) NOT NULL DEFAULT 1,
+  last_run_at        DATETIME NULL,
+  last_run_status    VARCHAR(16) NULL,
+  last_run_items     INT NOT NULL DEFAULT 0,
+  note               TEXT NULL,
+  sort_order         INT NOT NULL DEFAULT 0,
+  created_at         DATETIME NOT NULL,
+  updated_at         DATETIME NOT NULL,
+  UNIQUE KEY uq_sources_code (code),
+  KEY ix_sources_platform (platform)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS listings (
+  id                INT AUTO_INCREMENT PRIMARY KEY,
+  source_id         INT NOT NULL,
+  source_listing_no VARCHAR(40) NOT NULL,
+  community         VARCHAR(40) NOT NULL,
+  layout            VARCHAR(12) NOT NULL,
+  area_sqm          FLOAT NULL,
+  floor             INT NULL,
+  total_floors      INT NULL,
+  floor_band        VARCHAR(12) NULL,
+  unit_price        INT NULL,
+  total_price_wan   FLOAT NULL,
+  list_date         DATE NULL,
+  title             TEXT NOT NULL,
+  agent_name        VARCHAR(60) NULL,
+  agent_contact     VARCHAR(40) NULL,
+  completeness      FLOAT NOT NULL DEFAULT 1,
+  cluster_id        INT NULL,
+  is_primary        TINYINT(1) NOT NULL DEFAULT 0,
+  raw               TEXT NULL,
+  created_at        DATETIME NOT NULL,
+  updated_at        DATETIME NOT NULL,
+  UNIQUE KEY uq_listing_source_no (source_id, source_listing_no),
+  KEY ix_listings_block (community, layout),
+  KEY ix_listings_list_date (list_date),
+  KEY ix_listings_source (source_id),
+  KEY ix_listings_cluster (cluster_id),
+  CONSTRAINT fk_listings_source FOREIGN KEY (source_id) REFERENCES sources (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS listing_clusters (
+  id                 INT AUTO_INCREMENT PRIMARY KEY,
+  community          VARCHAR(40) NOT NULL,
+  layout             VARCHAR(12) NOT NULL,
+  block_key          VARCHAR(60) NOT NULL,
+  primary_listing_id INT NOT NULL,
+  member_count       INT NOT NULL DEFAULT 1,
+  platform_count     INT NOT NULL DEFAULT 1,
+  avg_unit_price     FLOAT NULL,
+  min_similarity     FLOAT NULL,
+  max_similarity     FLOAT NULL,
+  spread_pct         FLOAT NULL,
+  created_at         DATETIME NOT NULL,
+  updated_at         DATETIME NOT NULL,
+  UNIQUE KEY uq_cluster_primary (primary_listing_id),
+  KEY ix_cluster_block (block_key),
+  KEY ix_cluster_community (community),
+  KEY ix_cluster_layout (layout),
+  CONSTRAINT fk_cluster_primary FOREIGN KEY (primary_listing_id) REFERENCES listings (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS price_flags (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  listing_id     INT NOT NULL,
+  cluster_id     INT NULL,
+  flag_type      VARCHAR(12) NOT NULL,
+  community      VARCHAR(40) NOT NULL,
+  layout         VARCHAR(12) NOT NULL,
+  unit_price     INT NOT NULL,
+  median_price   FLOAT NOT NULL,
+  deviation_pct  FLOAT NOT NULL,
+  z_score        FLOAT NULL,
+  confidence     FLOAT NOT NULL DEFAULT 0,
+  sample_size    INT NOT NULL DEFAULT 0,
+  review_status  VARCHAR(16) NOT NULL DEFAULT 'pending',
+  review_note    TEXT NULL,
+  reviewed_by    VARCHAR(160) NULL,
+  reviewed_at    DATETIME NULL,
+  detected_at    DATETIME NOT NULL,
+  seed_key       VARCHAR(120) NULL,
+  created_at     DATETIME NOT NULL,
+  UNIQUE KEY uq_flags_listing (listing_id),
+  UNIQUE KEY uq_flags_seed_key (seed_key),
+  KEY ix_flags_type_status (flag_type, review_status),
+  CONSTRAINT fk_flags_listing FOREIGN KEY (listing_id) REFERENCES listings (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ingest_runs (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  run_no          VARCHAR(32) NOT NULL,
+  trigger_kind    VARCHAR(12) NOT NULL DEFAULT 'manual',
+  status          VARCHAR(12) NOT NULL DEFAULT 'running',
+  sources_total   INT NOT NULL DEFAULT 0,
+  pages_fetched   INT NOT NULL DEFAULT 0,
+  items_fetched   INT NOT NULL DEFAULT 0,
+  throttled_count INT NOT NULL DEFAULT 0,
+  backoff_ms      INT NOT NULL DEFAULT 0,
+  created_count   INT NOT NULL DEFAULT 0,
+  updated_count   INT NOT NULL DEFAULT 0,
+  cluster_count   INT NOT NULL DEFAULT 0,
+  duplicate_count INT NOT NULL DEFAULT 0,
+  dedup_count     INT NOT NULL DEFAULT 0,
+  flag_count      INT NOT NULL DEFAULT 0,
+  duration_ms     INT NOT NULL DEFAULT 0,
+  operator_email  VARCHAR(160) NOT NULL DEFAULT 'system',
+  message         TEXT NULL,
+  summary         JSON NULL,
+  started_at      DATETIME NOT NULL,
+  finished_at     DATETIME NULL,
+  seed_key        VARCHAR(120) NULL,
+  UNIQUE KEY uq_runs_no (run_no),
+  UNIQUE KEY uq_runs_seed_key (seed_key),
+  KEY ix_runs_status (status),
+  KEY ix_runs_started (started_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS block_stats (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  block_key      VARCHAR(60) NOT NULL,
+  community      VARCHAR(40) NOT NULL,
+  layout         VARCHAR(12) NOT NULL,
+  all_count      INT NOT NULL DEFAULT 0,
+  primary_count  INT NOT NULL DEFAULT 0,
+  unknown_count  INT NOT NULL DEFAULT 0,
+  naive_mean     FLOAT NULL,
+  dedup_mean     FLOAT NULL,
+  median_price   FLOAT NULL,
+  mad            FLOAT NULL,
+  min_price      FLOAT NULL,
+  max_price      FLOAT NULL,
+  updated_at     DATETIME NOT NULL,
+  UNIQUE KEY uq_block_key (block_key),
+  KEY ix_block_community (community),
+  KEY ix_block_layout (layout)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  actor_email VARCHAR(160) NOT NULL,
+  actor_role  VARCHAR(20)  NOT NULL,
+  action      VARCHAR(64)  NOT NULL,
+  entity      VARCHAR(40)  NOT NULL,
+  entity_id   VARCHAR(64)  NULL,
+  detail      JSON NULL,
+  layer       VARCHAR(16) NOT NULL DEFAULT 'domain',
+  ip          VARCHAR(64) NULL,
+  seed_key    VARCHAR(120) NULL,
+  created_at  DATETIME NOT NULL,
+  UNIQUE KEY uq_audit_seed_key (seed_key),
+  KEY ix_audit_actor (actor_email),
+  KEY ix_audit_action (action),
+  KEY ix_audit_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
