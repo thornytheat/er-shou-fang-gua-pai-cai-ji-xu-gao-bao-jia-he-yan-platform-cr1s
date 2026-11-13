@@ -18,11 +18,17 @@ from src.utils.timeutil import iso_date, iso_utc, utcnow
 
 
 def counts(db: Session) -> dict:
-    by_type = dict(db.execute(select(PriceFlag.flag_type, func.count()).group_by(PriceFlag.flag_type)).all())
-    by_status = dict(
-        db.execute(select(PriceFlag.review_status, func.count()).group_by(PriceFlag.review_status)).all()
+    # 隔离挂牌的工单不进核验队列（人工复核结果保留，源恢复后重新生效）
+    visible = select(PriceFlag.id).join(Listing, Listing.id == PriceFlag.listing_id).where(
+        Listing.quarantined.is_(False)
     )
-    total = db.scalar(select(func.count()).select_from(PriceFlag)) or 0
+    visible_flags = db.scalars(select(PriceFlag).where(PriceFlag.id.in_(visible))).all()
+    by_type: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    for flag in visible_flags:
+        by_type[flag.flag_type] = by_type.get(flag.flag_type, 0) + 1
+        by_status[flag.review_status] = by_status.get(flag.review_status, 0) + 1
+    total = len(visible_flags)
     return {
         "total": int(total),
         "by_type": {key: int(by_type.get(key, 0)) for key in FLAG_TYPE_ORDER},
@@ -41,7 +47,11 @@ def list_flags(
     review_status: str | None = None,
     limit: int = 60,
 ) -> dict:
-    query = select(PriceFlag).join(Listing, Listing.id == PriceFlag.listing_id)
+    query = (
+        select(PriceFlag)
+        .join(Listing, Listing.id == PriceFlag.listing_id)
+        .where(Listing.quarantined.is_(False))
+    )
     if flag_type:
         query = query.where(PriceFlag.flag_type == flag_type)
     if review_status:
@@ -86,6 +96,14 @@ def review(db: Session, flag_id: int, review_status: str, note: str | None, acto
     flag = db.get(PriceFlag, flag_id)
     if flag is None:
         raise AppError("NOT_FOUND", 404, detail=f"flag_id={flag_id}")
+    listing = db.get(Listing, flag.listing_id)
+    if listing is not None and listing.quarantined:
+        # 整源隔离期间禁止复核：这批挂牌已不参与均价/工单，避免人工结论挂到漂移数据上
+        raise AppError(
+            "SOURCE_QUARANTINED",
+            409,
+            detail={"listing_id": flag.listing_id, "message": "所属来源已整源隔离，恢复完整采集后才能复核"},
+        )
     if review_status not in {item.value for item in ReviewStatus}:
         raise AppError("VALIDATION", 422, detail="review_status 不在枚举内")
     flag.review_status = review_status

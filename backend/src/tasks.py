@@ -44,7 +44,13 @@ def scheduled_ingest() -> dict:
                 action="ingest.schedule",
                 entity="ingest_run",
                 entity_id=run.id,
-                detail={"items": run.items_fetched, "throttled": run.throttled_count},
+                detail={
+                    "items": run.items_fetched,
+                    "throttled": run.throttled_count,
+                    "status": run.status,
+                    "replaced": run.summary.get("replaced_total", 0),
+                    "isolated": run.summary.get("isolated_total", 0),
+                },
                 layer="worker",
             )
             payload = {

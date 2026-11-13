@@ -62,6 +62,7 @@ def serialize_row(
         "cluster_size": cluster.member_count if cluster else 1,
         "platform_count": cluster.platform_count if cluster else 1,
         "is_primary": bool(listing.is_primary),
+        "quarantined": bool(listing.quarantined),
         "flag_type": flag_type,
         "flag_label": FLAG_TYPE_LABELS.get(flag_type) if flag_type else None,
         "deviation_pct": flag.deviation_pct if flag else None,
@@ -125,14 +126,16 @@ def list_listings(
         )
         for listing in rows
     ]
+    # 页内均价/区间只统计有效挂牌；整源隔离的挂牌可被看到但不进任何统计
     blocked = [row for row in items if row["unit_price"] is None]
-    priced = [row for row in items if row["unit_price"] is not None]
+    priced = [row for row in items if row["unit_price"] is not None and not row["quarantined"]]
     sums = {
         "page_avg_unit_price": round(sum(row["unit_price"] for row in priced) / len(priced)) if priced else None,
         "page_min_unit_price": min((row["unit_price"] for row in priced), default=None),
         "page_max_unit_price": max((row["unit_price"] for row in priced), default=None),
         "unknown_area": len(blocked),
         "duplicate_rows": sum(1 for row in items if row["cluster_size"] > 1),
+        "quarantined_rows": sum(1 for row in items if row["quarantined"]),
     }
     return {"items": items, "total": total, "page": page, "page_size": page_size, "sums": sums}
 
@@ -241,6 +244,12 @@ def fix_price(db: Session, listing_id: int, unit_price: int, note: str) -> Listi
     listing = db.get(Listing, listing_id)
     if listing is None:
         raise AppError("NOT_FOUND", 404, detail=f"listing_id={listing_id}")
+    if listing.quarantined:
+        raise AppError(
+            "SOURCE_QUARANTINED",
+            409,
+            detail={"listing_id": listing_id, "message": "该挂牌所属来源已整源隔离，恢复完整采集前不能改价"},
+        )
     listing.unit_price = int(unit_price)
     if listing.area_sqm:
         listing.total_price_wan = round(unit_price * listing.area_sqm / 10000, 2)
@@ -258,6 +267,13 @@ def filter_options(db: Session) -> dict:
         "layouts": layouts,
         "sources": [{"id": source.id, "name": source.name, "platform": source.platform} for source in sources],
         "pending_reviews": len(
-            db.scalars(select(PriceFlag.id).where(PriceFlag.review_status == ReviewStatus.PENDING.value)).all()
+            db.scalars(
+                select(PriceFlag)
+                .join(Listing, Listing.id == PriceFlag.listing_id)
+                .where(
+                    PriceFlag.review_status == ReviewStatus.PENDING.value,
+                    Listing.quarantined.is_(False),
+                )
+            ).all()
         ),
     }

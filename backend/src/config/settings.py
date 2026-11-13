@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     app_timezone_offset_minutes: int = 480
     crawl_backoff_base_ms: int = 800
     fixture_dir: str = "fixtures"
+    # 故障注入：形如 "anjuke_portal:crash,agent_moments:partial_page"，
+    # 只影响下一次采集读取，用于演示「来源取数不完整 → 整源隔离」
+    fault_injection: str = ""
 
     @property
     def database_url(self) -> str:

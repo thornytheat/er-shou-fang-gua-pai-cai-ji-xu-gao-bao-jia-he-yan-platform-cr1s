@@ -26,8 +26,10 @@ from src.models.ingest_run import IngestRun
 from src.models.listing import Listing
 from src.models.price_flag import PriceFlag
 from src.models.source import Source
+from src.models.source_batch import SourceBatch
 from src.models.user import User
-from src.services import cluster_service, fetch_service
+from src.constants.enums import SourceBatchStatus
+from src.services import cluster_service, fetch_service, ingest_service
 from src.utils.security import hash_password
 from src.utils.timeutil import utcnow
 
@@ -74,16 +76,17 @@ def ensure_sources(db) -> dict[str, Source]:
     return result
 
 
-def ensure_listings(db) -> tuple[int, int]:
+def ensure_listings(db) -> dict[str, dict]:
     sources = {source.code: source for source in db.scalars(select(Source)).all()}
     platforms = fetch_service.load_platforms()
-    created = updated = 0
+    per_source: dict[str, dict] = {}
     for code, source in sources.items():
         if code not in platforms["platforms"]:
             continue
         outcome = fetch_service.crawl_source(
             {"code": code, "name": source.name}, platforms, simulate_throttle=False
         )
+        created = updated = 0
         for row in outcome["rows"]:
             listing = db.scalar(
                 select(Listing).where(
@@ -117,8 +120,48 @@ def ensure_listings(db) -> tuple[int, int]:
             listing.agent_contact = row.get("agent_contact")
             listing.completeness = row.get("completeness") or 0.0
             listing.raw = json.dumps(row.get("raw") or {}, ensure_ascii=False)
+            # seed 灌数即完整快照，任何历史隔离态都解除
+            listing.quarantined = False
         db.flush()
-    return created, updated
+        per_source[code] = {
+            "source": source,
+            "rows": outcome["rows"],
+            "pages": outcome["pages_fetched"],
+            "created": created,
+            "updated": updated,
+        }
+    return per_source
+
+
+def ensure_source_batches(db, per_source: dict[str, dict], baseline_run: IngestRun) -> None:
+    """初始落批：每源一条 replaced 批，内容哈希作为后续「重复运行只生效一次」的基线。"""
+    for code, payload in per_source.items():
+        source = payload["source"]
+        exists = db.scalar(
+            select(SourceBatch).where(
+                SourceBatch.source_id == source.id,
+                SourceBatch.status == SourceBatchStatus.REPLACED.value,
+            )
+        )
+        if exists is not None:
+            continue
+        db.add(
+            SourceBatch(
+                run_id=baseline_run.id,
+                source_id=source.id,
+                source_code=code,
+                status=SourceBatchStatus.REPLACED.value,
+                pages_expected=payload["pages"],
+                pages_fetched=payload["pages"],
+                received_count=len(payload["rows"]),
+                replaced_count=len(payload["rows"]),
+                created_count=payload["created"],
+                updated_count=payload["updated"],
+                content_hash=ingest_service._content_hash(payload["rows"]),
+                detail={"seeded": True},
+            )
+        )
+    db.flush()
 
 
 def ensure_history_runs(db) -> None:
@@ -178,9 +221,13 @@ def seed_all() -> str:
     with session_scope() as db:
         user_count = ensure_users(db)
         ensure_sources(db)
-        ensure_listings(db)
+        per_source = ensure_listings(db)
         cluster_service.recompute(db)
         ensure_history_runs(db)
+        baseline_run = db.scalars(
+            select(IngestRun).order_by(IngestRun.id.desc()).limit(1)
+        ).first()
+        ensure_source_batches(db, per_source, baseline_run)
         ensure_seed_audit(db)
 
         source_count = db.scalar(select(func.count()).select_from(Source)) or 0

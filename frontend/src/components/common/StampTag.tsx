@@ -1,4 +1,4 @@
-/** 印章标签：虚高 / 虚低 / 待确认 / 重复 / 复核态。多页共用。 */
+/** 印章标签：虚高 / 虚低 / 待确认 / 重复 / 复核态 / 落批态。多页共用。 */
 const LABELS: Record<string, string> = {
   high: '虚高',
   low: '虚低',
@@ -11,6 +11,10 @@ const LABELS: Record<string, string> = {
   partial: '部分成功',
   failed: '失败',
   running: '运行中',
+  replaced: '已替换',
+  unchanged: '重复跳过',
+  isolated: '已隔离',
+  quarantined: '整源隔离',
 };
 
 export default function StampTag({

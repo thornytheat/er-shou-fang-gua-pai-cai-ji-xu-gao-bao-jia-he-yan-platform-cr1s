@@ -26,6 +26,7 @@ class ListingRow(BaseModel):
     cluster_size: int = 1
     platform_count: int = 1
     is_primary: bool = False
+    quarantined: bool = False
     flag_type: str | None = None
     flag_label: str | None = None
     deviation_pct: float | None = None

@@ -98,9 +98,10 @@ export default function Listings() {
   const metrics = useMemo(
     () => [
       { k: '挂牌总数', v: data ? data.total : '—', unit: '条', d: '5 个平台合计' },
-      { k: '本页均价', v: sums?.page_avg_unit_price ? yuan(sums.page_avg_unit_price) : '—', unit: '元/㎡', d: '含重复挂牌' },
+      { k: '本页均价', v: sums?.page_avg_unit_price ? yuan(sums.page_avg_unit_price) : '—', unit: '元/㎡', d: '仅有效挂牌，隔离源不计' },
       { k: '本页单价区间', v: `${sums?.page_min_unit_price ? yuan(sums.page_min_unit_price) : '—'} ~ ${sums?.page_max_unit_price ? yuan(sums.page_max_unit_price) : '—'}`, d: '元/㎡' },
       { k: '本页重复行', v: sums?.duplicate_rows ?? 0, unit: '条', d: '同簇多平台挂牌' },
+      { k: '整源隔离', v: sums?.quarantined_rows ?? 0, unit: '条', d: '保留可查，不进均价/工单/导出' },
       { k: '面积缺失', v: sums?.unknown_area ?? 0, unit: '条', d: '不计入均价' },
     ],
     [data, sums],
@@ -164,6 +165,9 @@ export default function Listings() {
       label: '标记',
       render: (row: ListingRow) => (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {row.quarantined ? (
+            <StampTag kind="quarantined" label="整源隔离" title="所属来源本次取数不完整：旧挂牌保留但不进均价、工单与导出" />
+          ) : null}
           {row.cluster_size > 1 ? (
             <StampTag kind="dup" label={`重复 ${row.cluster_size}`} title={`同簇 ${row.platform_count} 个平台`} />
           ) : null}
@@ -322,7 +326,9 @@ export default function Listings() {
                 rows={data.items}
                 rowKey={(row) => row.id}
                 onRowClick={(row) => navigate(`/listings/${row.id}`)}
-                rowClassName={(row) => (row.cluster_size > 1 ? 'is-dup' : '')}
+                rowClassName={(row) =>
+                  [row.cluster_size > 1 ? 'is-dup' : '', row.quarantined ? 'is-quarantined' : ''].filter(Boolean).join(' ')
+                }
                 testId="listing-ledger"
               />
               <div className="row spread">

@@ -14,3 +14,5 @@ kombu==5.4.0
 redis==5.2.1
 python-dateutil==2.9.0.post0
 pytest==8.3.4
+# TestClient 依赖（仅测试期；HTTP 端到端用例 tests/test_ingest_http.py）
+httpx==0.28.1

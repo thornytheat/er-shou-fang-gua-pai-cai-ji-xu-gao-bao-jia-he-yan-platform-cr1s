@@ -60,7 +60,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <h1>二手房挂牌采集与虚高报价核验台</h1>
             <div className="sub">
               {latest
-                ? `最近一次采集 ${dateText(latest.started_at)} · ${latest.items_fetched} 条 / 限流 ${latest.throttled_count} 次 · ${latest.dedup_count} 套去重后口径`
+                ? `最近一次采集 ${dateText(latest.started_at)} · ${latest.items_fetched} 条 / 限流 ${latest.throttled_count} 次 · ${latest.dedup_count} 套去重后口径${
+                    latest.summary?.isolated_total
+                      ? ` · ${latest.summary.isolated_total} 条整源隔离（不进周报）`
+                      : ''
+                  }`
                 : '还没有采集记录，先去「采集源与运行」跑一次'}
             </div>
           </div>

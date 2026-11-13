@@ -164,8 +164,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .stamp.confirmed { color: var(--moss); background: var(--moss-wash); }
 .stamp.dismissed { color: var(--ink-faint); background: var(--paper-2); }
 .stamp.pending { color: var(--brass); background: var(--brass-wash); }
+.stamp.replaced { color: var(--moss); background: var(--moss-wash); }
+.stamp.unchanged { color: var(--ink-faint); background: var(--paper-2); }
+.stamp.isolated, .stamp.quarantined { color: var(--ochre); background: var(--ochre-wash); border-style: dashed; }
 .stamp.entered { animation: stamp-in 260ms var(--ease-out) both; }
 @keyframes stamp-in { from { transform: rotate(-1.6deg) scale(1.5); opacity: 0; } to { transform: rotate(-1.6deg) scale(1); opacity: 1; } }
+
+/* 整源隔离行：旧挂牌保留可查，但视觉上明确划出有效口径之外 */
+.ledger tr.is-quarantined { background: var(--paper-2); opacity: 0.72; }
+.ledger tr.is-quarantined:hover { background: var(--paper-3); }
+.ledger tr.is-quarantined td:first-child { box-shadow: inset 3px 0 0 var(--ochre); }
 
 /* 指标条 */
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }

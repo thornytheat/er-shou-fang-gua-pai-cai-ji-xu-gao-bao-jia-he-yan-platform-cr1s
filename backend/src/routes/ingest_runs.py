@@ -38,3 +38,13 @@ def detail(
     db: Session = Depends(get_db),
 ) -> dict:
     return ingest_controller.detail(db, run_id)
+
+
+@router.get("/{run_id}/batches")
+def run_batches(
+    run_id: int,
+    principal: dict = Depends(require_roles(*SOURCE_READ_ROLES)),
+    db: Session = Depends(get_db),
+) -> dict:
+    """逐源落批明细：每源收到 / 隔离 / 替换多少条及原因。"""
+    return ingest_controller.run_batches(db, run_id)

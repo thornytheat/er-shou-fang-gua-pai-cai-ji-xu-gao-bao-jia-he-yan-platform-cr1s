@@ -14,6 +14,7 @@ from src.models.cluster import ListingCluster  # noqa: E402
 from src.models.price_flag import PriceFlag  # noqa: E402
 from src.models.ingest_run import IngestRun  # noqa: E402
 from src.models.block_stat import BlockStat  # noqa: E402
+from src.models.source_batch import SourceBatch  # noqa: E402
 
 __all__ = [
     "Base",
@@ -25,4 +26,5 @@ __all__ = [
     "PriceFlag",
     "IngestRun",
     "BlockStat",
+    "SourceBatch",
 ]

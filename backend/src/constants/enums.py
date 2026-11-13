@@ -65,6 +65,27 @@ class IngestStatus(StrEnum):
     FAILED = "failed"
 
 
+class SourceBatchStatus(StrEnum):
+    """单个来源在一次运行里的落批结果。
+
+    replaced  完整快照，已原子替换该来源的旧挂牌
+    unchanged 快照与上一生效批完全一致（同内容哈希），重复运行，不写入、不重算
+    isolated  取数不完整（异常 / 分页缺页 / 空快照），整源隔离：旧挂牌保留但打隔离标，
+              不参与去重、均价、工单与导出
+    """
+
+    REPLACED = "replaced"
+    UNCHANGED = "unchanged"
+    ISOLATED = "isolated"
+
+
+SOURCE_BATCH_STATUS_LABELS: dict[str, str] = {
+    SourceBatchStatus.REPLACED.value: "已替换",
+    SourceBatchStatus.UNCHANGED.value: "重复跳过",
+    SourceBatchStatus.ISOLATED.value: "已隔离",
+}
+
+
 class FlagType(StrEnum):
     """价格异常工单类型：虚高 / 虚低 / 待确认（边界样本）。"""
 
@@ -113,3 +134,24 @@ INGEST_STATUS_LABELS: dict[str, str] = {
     IngestStatus.PARTIAL.value: "部分成功",
     IngestStatus.FAILED.value: "失败",
 }
+
+
+class FaultKind(StrEnum):
+    """故障注入开关（仅演示/测试用，靠环境变量 FAULT_INJECTION 开启）。"""
+
+    OFF = "off"
+    # 抛异常：模拟连接失败 / 整源 5xx，整源一页都没拿到
+    CRASH = "crash"
+    # 分页缺页：中途某页抛异常，只拿到部分页（分页没取全 → 整源隔离）
+    PARTIAL_PAGE = "partial_page"
+    # 空快照：所有页正常但解析出 0 条（疑似被反爬重定向到空列表页）
+    EMPTY = "empty"
+
+
+class QuarantineReason(StrEnum):
+    """来源隔离原因（写进 source_batches.reason 与挂牌池隔离标）。"""
+
+    FETCH_CRASH = "fetch_crash"          # 抓取过程抛异常，整源未取全
+    PAGE_INCOMPLETE = "page_incomplete"  # 分页缺页 / 429 重试耗尽
+    EMPTY_SNAPSHOT = "empty_snapshot"    # 页面都 200 但解析为 0 条
+    PARSE_ERROR = "parse_error"          # 解析失败，字段无法归一

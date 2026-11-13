@@ -11,7 +11,7 @@ from src.utils.errors import AppError
 from src.utils.timeutil import iso_utc, utcnow
 
 
-def serialize(source: Source, listing_count: int = 0) -> dict:
+def serialize(source: Source, listing_count: int = 0, latest_batch: dict | None = None) -> dict:
     return {
         "id": source.id,
         "code": source.code,
@@ -28,10 +28,13 @@ def serialize(source: Source, listing_count: int = 0) -> dict:
         "last_run_items": source.last_run_items,
         "listing_count": listing_count,
         "note": source.note,
+        "latest_batch": latest_batch,
     }
 
 
 def list_sources(db: Session, include_disabled: bool = True) -> dict:
+    from src.services.ingest_service import latest_batches
+
     query = select(Source).order_by(Source.sort_order, Source.id)
     if not include_disabled:
         query = query.where(Source.enabled.is_(True))
@@ -39,7 +42,17 @@ def list_sources(db: Session, include_disabled: bool = True) -> dict:
     counts = dict(
         db.execute(select(Listing.source_id, func.count()).group_by(Listing.source_id)).all()
     )
-    return {"items": [serialize(source, int(counts.get(source.id, 0))) for source in sources]}
+    batch_by_source = {batch["source_id"]: batch for batch in latest_batches(db)}
+    return {
+        "items": [
+            serialize(
+                source,
+                int(counts.get(source.id, 0)),
+                batch_by_source.get(source.id),
+            )
+            for source in sources
+        ]
+    }
 
 
 def get_source(db: Session, source_id: int) -> Source:

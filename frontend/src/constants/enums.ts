@@ -41,6 +41,19 @@ export const INGEST_STATUS_LABELS: Record<string, string> = {
   failed: '失败',
 };
 
+export const SOURCE_BATCH_STATUS_LABELS: Record<string, string> = {
+  replaced: '已替换',
+  unchanged: '重复跳过',
+  isolated: '已隔离',
+};
+
+export const QUARANTINE_REASON_LABELS: Record<string, string> = {
+  fetch_crash: '抓取异常，整源未取全',
+  page_incomplete: '分页缺页 / 429 重试耗尽',
+  empty_snapshot: '页面正常但解析 0 条（空快照）',
+  parse_error: '解析失败，字段无法归一',
+};
+
 export const LAYOUT = ['一居', '两居', '三居'];
 
 export const FLOOR_BAND = ['低楼层', '中楼层', '高楼层'];

@@ -9,6 +9,28 @@ export interface UserInfo {
   permissions: string[];
 }
 
+export interface SourceBatch {
+  id: number;
+  run_id: number;
+  source_id: number;
+  source_code: string;
+  status: 'replaced' | 'unchanged' | 'isolated';
+  pages_expected: number;
+  pages_fetched: number;
+  received_count: number;
+  isolated_count: number;
+  replaced_count: number;
+  created_count: number;
+  updated_count: number;
+  deleted_count: number;
+  throttled_count: number;
+  backoff_ms: number;
+  content_hash: string | null;
+  reason: string | null;
+  detail: Record<string, unknown>;
+  created_at: string | null;
+}
+
 export interface SourceRow {
   id: number;
   code: string;
@@ -25,6 +47,7 @@ export interface SourceRow {
   last_run_items: number;
   listing_count: number;
   note: string | null;
+  latest_batch?: SourceBatch | null;
 }
 
 export interface IngestRun {
@@ -57,6 +80,11 @@ export interface IngestRun {
     unknown_area?: number;
     edge_count?: number;
     pair_count?: number;
+    recomputed?: boolean;
+    replaced_total?: number;
+    isolated_total?: number;
+    deleted_total?: number;
+    source_batches?: SourceBatch[];
   };
 }
 
@@ -96,6 +124,7 @@ export interface ListingRow {
   cluster_size: number;
   platform_count: number;
   is_primary: boolean;
+  quarantined: boolean;
   flag_type: string | null;
   flag_label: string | null;
   deviation_pct: number | null;
@@ -113,6 +142,7 @@ export interface ListingPage {
     page_max_unit_price?: number | null;
     unknown_area?: number;
     duplicate_rows?: number;
+    quarantined_rows?: number;
   };
 }
 
@@ -211,6 +241,7 @@ export interface Overview {
   sources: number;
   sources_enabled: number;
   listings: number;
+  quarantined: number;
   primaries: number;
   duplicate_clusters: number;
   duplicate_members: number;

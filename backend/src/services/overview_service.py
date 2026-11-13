@@ -34,7 +34,17 @@ def overview(db: Session) -> dict:
     sources = db.scalar(select(func.count()).select_from(Source)) or 0
     enabled_sources = db.scalar(select(func.count()).select_from(Source).where(Source.enabled.is_(True))) or 0
     listings = db.scalar(select(func.count()).select_from(Listing)) or 0
-    primaries = db.scalar(select(func.count()).select_from(Listing).where(Listing.is_primary.is_(True))) or 0
+    quarantined = (
+        db.scalar(select(func.count()).select_from(Listing).where(Listing.quarantined.is_(True))) or 0
+    )
+    primaries = (
+        db.scalar(
+            select(func.count())
+            .select_from(Listing)
+            .where(Listing.is_primary.is_(True), Listing.quarantined.is_(False))
+        )
+        or 0
+    )
     duplicate_clusters = (
         db.scalar(select(func.count()).select_from(ListingCluster).where(ListingCluster.member_count > 1)) or 0
     )
@@ -51,6 +61,7 @@ def overview(db: Session) -> dict:
         "sources": int(sources),
         "sources_enabled": int(enabled_sources),
         "listings": int(listings),
+        "quarantined": int(quarantined),
         "primaries": int(primaries),
         "duplicate_clusters": int(duplicate_clusters),
         "duplicate_members": int(duplicate_members or 0),

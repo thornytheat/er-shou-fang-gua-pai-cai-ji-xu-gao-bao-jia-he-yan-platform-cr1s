@@ -47,7 +47,8 @@ def rows_for_export(
     since: str | None = None,
     flag_only: bool = False,
 ) -> list[list]:
-    query = select(Listing).where(Listing.is_primary.is_(True))
+    # 只导出有效主房源：整源隔离的挂牌不进周报导出
+    query = select(Listing).where(Listing.is_primary.is_(True), Listing.quarantined.is_(False))
     if community:
         query = query.where(Listing.community == community)
     if since:

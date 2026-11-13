@@ -34,11 +34,24 @@
 | 模块 | 页面 | 关键能力 |
 |---|---|---|
 | 登录 / 鉴权 | `/login` | JWT + 三角色；密码 `Demo@2026`；低权角色调高权接口真实 403 |
-| 采集运行 | `/sources` | 5 个源分页抓取、429 指数退避、逐源结果、运行记录、只重算去重 |
-| 挂牌池 | `/listings` | 重复标记、单价排序、小区/户型/来源/标记筛选、去重后口径切换、分页 |
-| 房源详情 | `/listings/:id` | 多平台并排对比 + 簇内相似度 + 价格序列 SVG + 小区×户型 均价口径（去重前/后） |
-| 核验队列 | `/flags` | 虚高/虚低/待确认分栏、偏离条、稳健 z、置信度、一键确认/驳回、导出 |
-| 行情导出 | `/flags`、API | `GET /api/exports/market.csv`，去重后主房源口径，194 行 |
+| 采集运行 | `/sources` | 5 个源分页抓取、429 指数退避、**按来源完整落批（替换/重复跳过/整源隔离）**、逐源 收到/隔离/替换 核对、运行记录 |
+| 挂牌池 | `/listings` | 重复/隔离标记、单价排序、小区/户型/来源/标记筛选、去重后口径切换、分页（隔离挂牌可见但不进任何统计） |
+| 房源详情 | `/listings/:id` | 多平台并排对比 + 簇内相似度 + 价格序列 SVG + 小区×户型 均价口径（去重前/后）；隔离房源禁改价/复核 |
+| 核验队列 | `/flags` | 虚高/虚低/待确认分栏、偏离条、稳健 z、置信度、一键确认/驳回、导出（隔离源工单不进队列） |
+| 行情导出 | `/flags`、API | `GET /api/exports/market.csv`，去重后主房源口径，**只含有效（非隔离）挂牌** |
+
+### 按来源完整落批（不允许跨源混算）
+
+一次采集对每个来源**独立整批处理**，结果落 `source_batches` 表（`GET /api/ingest-runs/{id}/batches` 可逐源核对 收到/隔离/替换多少条及原因）：
+
+| 落批状态 | 触发条件 | 对挂牌与口径的影响 |
+|---|---|---|
+| `isolated` 整源隔离 | 取数不完整：抓取异常 `fetch_crash` / 分页缺页或 429 重试耗尽 `page_incomplete` / 空快照 `empty_snapshot` / 解析失败 `parse_error` | **该来源挂牌一条不改写**；旧挂牌全部置 `quarantined`，不进去重簇、均价、工单与导出；隔离期禁止改价与复核（`SOURCE_QUARANTINED` 409），避免人工结论挂到漂移数据上 |
+| `replaced` 原子替换 | 快照完整且内容哈希与上一生效批不同 | 按 `(source_id, source_listing_no)` 自然键原地更新（**行 id 不变 → 价格工单与人工复核仍对应原房，不漂移**）；快照消失的挂牌连同其工单删除，新挂牌插入 |
+| `unchanged` 重复跳过 | 快照完整且内容哈希与上一生效批一致 | 同一批重复运行只生效一次：不写挂牌、不重算；运行仍留痕但 `recomputed=false` |
+
+只有发生「替换」或「隔离态变化」时才触发去重 / 均价 / 工单重算；任一来源隔离都不会污染其余来源，也不会把新旧数据混进同一次周报口径。故障演示用环境变量 `FAULT_INJECTION="源code:crash|partial_page|empty"`（见 `.env.example`）。
+
 
 ### 两个真算算法（全部在 Python 后端，前端不含任何硬编码结果）
 
@@ -136,7 +149,7 @@ gb-577/
 │   └── src/
 │       ├── config/               # settings / database / celery_app / app
 │       ├── constants/            # enums / roles / limits（算法阈值）/ error_codes / log_templates
-│       ├── models/               # user audit source listing cluster price_flag ingest_run block_stat
+│       ├── models/               # user audit source listing source_batch cluster price_flag ingest_run block_stat
 │       ├── schemas/              # auth source listing cluster price_flag ingest common
 │       ├── services/             # fetch parsers fingerprint price cluster ingest listing source flag export audit overview
 │       ├── controllers/          # auth source listing cluster flag ingest export overview
@@ -175,6 +188,7 @@ gb-577/
 | `RATE_LIMIT_WRITE_PER_MINUTE` | `60` | 写接口额度（采集/复核/改价等） |
 | `APP_TIMEZONE_OFFSET_MINUTES` | `480` | 业务时区 UTC+8 |
 | `CRAWL_BACKOFF_BASE_MS` | `800` | 429 退避基数（指数 2ⁿ，上限 4s） |
+| `FAULT_INJECTION` | 空 | 故障注入演示：`源code:crash|partial_page|empty`，命中源当次整源隔离；留空关闭 |
 
 ---
 
@@ -196,6 +210,7 @@ gb-577/
 | `FlagType`（high/low/uncertain） | 同上 | `services/price_service.py`、`services/cluster_service.py`、`services/flag_service.py`、`schemas/price_flag.py` | 同上 + `FLAG_TYPE_LABELS` | `pages/Flags.tsx`、`pages/Listings.tsx`、`pages/ListingDetail.tsx`、`components/common/StampTag.tsx` |
 | `ReviewStatus`（pending/confirmed/dismissed） | 同上 | `services/flag_service.py`、`services/cluster_service.py`、`services/export_service.py` | 同上 + `REVIEW_LABELS` | `pages/Flags.tsx`、`pages/ListingDetail.tsx` |
 | `IngestStatus`（running/success/partial/failed） | 同上 | `services/ingest_service.py`、`models/ingest_run.py`、`scripts/seed_demo.py` | 同上 + `INGEST_STATUS_LABELS` | `pages/Sources.tsx` |
+| `SourceBatchStatus`（replaced/unchanged/isolated）+ `QuarantineReason`（fetch_crash/page_incomplete/empty_snapshot/parse_error） | 同上 | `services/ingest_service.py`、`services/fetch_service.py`、`models/source_batch.py` | 同上 + `SOURCE_BATCH_STATUS_LABELS`、`QUARANTINE_REASON_LABELS` | `pages/Sources.tsx`、`pages/Listings.tsx`、`pages/ListingDetail.tsx`、`components/common/StampTag.tsx` |
 | `PlatformKind`（aggregator/portal/forum/moments/notice） | 同上 | `services/parsers.py`、`services/source_service.py`、`fixtures/sources.json` | 同上 + `PLATFORM_LABELS` | `pages/Sources.tsx` |
 | `Layout` / `FloorBand` | 同上 | `services/parsers.py`、`utils/similarity.py` | 同上 | `pages/Listings.tsx`、`pages/ListingDetail.tsx` |
 

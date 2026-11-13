@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS listings (
   completeness      FLOAT NOT NULL DEFAULT 1,
   cluster_id        INT NULL,
   is_primary        TINYINT(1) NOT NULL DEFAULT 0,
+  quarantined       TINYINT(1) NOT NULL DEFAULT 0,
   raw               TEXT NULL,
   created_at        DATETIME NOT NULL,
   updated_at        DATETIME NOT NULL,
@@ -62,6 +63,7 @@ CREATE TABLE IF NOT EXISTS listings (
   KEY ix_listings_list_date (list_date),
   KEY ix_listings_source (source_id),
   KEY ix_listings_cluster (cluster_id),
+  KEY ix_listings_quarantined (quarantined),
   CONSTRAINT fk_listings_source FOREIGN KEY (source_id) REFERENCES sources (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -159,6 +161,35 @@ CREATE TABLE IF NOT EXISTS block_stats (
   UNIQUE KEY uq_block_key (block_key),
   KEY ix_block_community (community),
   KEY ix_block_layout (layout)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 来源级落批记录：每次运行里每个源 收到 / 隔离 / 替换 多少条及原因
+CREATE TABLE IF NOT EXISTS source_batches (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  run_id          INT NOT NULL,
+  source_id       INT NOT NULL,
+  source_code     VARCHAR(40) NOT NULL,
+  status          VARCHAR(12) NOT NULL,
+  pages_expected  INT NOT NULL DEFAULT 0,
+  pages_fetched   INT NOT NULL DEFAULT 0,
+  received_count  INT NOT NULL DEFAULT 0,
+  isolated_count  INT NOT NULL DEFAULT 0,
+  replaced_count  INT NOT NULL DEFAULT 0,
+  created_count   INT NOT NULL DEFAULT 0,
+  updated_count   INT NOT NULL DEFAULT 0,
+  deleted_count   INT NOT NULL DEFAULT 0,
+  throttled_count INT NOT NULL DEFAULT 0,
+  backoff_ms      INT NOT NULL DEFAULT 0,
+  content_hash    VARCHAR(64) NULL,
+  reason          VARCHAR(32) NULL,
+  detail          JSON NULL,
+  created_at      DATETIME NOT NULL,
+  KEY ix_source_batches_run (run_id),
+  KEY ix_source_batches_source (source_id),
+  KEY ix_source_batches_code (source_code),
+  KEY ix_source_batches_status (status),
+  CONSTRAINT fk_source_batches_run FOREIGN KEY (run_id) REFERENCES ingest_runs (id),
+  CONSTRAINT fk_source_batches_source FOREIGN KEY (source_id) REFERENCES sources (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS audit_logs (

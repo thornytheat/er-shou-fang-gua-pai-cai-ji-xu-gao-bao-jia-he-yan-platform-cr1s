@@ -48,6 +48,9 @@ class Listing(Base):
     completeness: Mapped[float] = mapped_column(Float, default=1.0)
     cluster_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 整源隔离标记：所属来源最近一次取数不完整时，旧挂牌保留但隔离，
+    # 不参与去重簇、均价、价格工单与行情导出（由 ingest_service 按批维护）
+    quarantined: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

@@ -19,6 +19,7 @@ class SourceOut(BaseModel):
     last_run_items: int = 0
     listing_count: int = 0
     note: str | None = None
+    latest_batch: dict | None = None
 
 
 class SourcePatchIn(BaseModel):

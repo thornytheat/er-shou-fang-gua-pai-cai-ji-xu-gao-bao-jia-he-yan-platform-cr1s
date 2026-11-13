@@ -22,7 +22,8 @@ from src.utils.timeutil import iso_date, utcnow
 
 
 def _listing_dicts(db: Session) -> list[dict]:
-    rows = db.scalars(select(Listing)).all()
+    # 整源隔离的挂牌不参与任何去重 / 均价 / 工单口径（保留在库里可查，但全部排除）
+    rows = db.scalars(select(Listing).where(Listing.quarantined.is_(False))).all()
     return [
         {
             "id": row.id,
@@ -39,6 +40,28 @@ def _listing_dicts(db: Session) -> list[dict]:
         }
         for row in rows
     ]
+
+
+def current_counts(db: Session) -> dict:
+    """不重算，只按当前库状态回传统计（同一批重复运行、无落批变化时用）。"""
+    listings = db.scalars(select(Listing).where(Listing.quarantined.is_(False))).all()
+    clusters = db.scalars(select(ListingCluster)).all()
+    flags = db.scalars(select(PriceFlag)).all()
+    counts = {"high": 0, "low": 0, "uncertain": 0}
+    for flag in flags:
+        counts[flag.flag_type] = counts.get(flag.flag_type, 0) + 1
+    return {
+        "cluster_count": len(clusters),
+        "duplicate_count": sum(1 for cluster in clusters if cluster.member_count > 1),
+        "dedup_count": len(clusters),
+        "member_total": sum(cluster.member_count for cluster in clusters),
+        "edge_count": 0,
+        "pair_count": 0,
+        "flag_counts": counts,
+        "flag_total": len(flags),
+        "blocks": len(db.scalars(select(BlockStat)).all()),
+        "active_listings": len(listings),
+    }
 
 
 def recompute(db: Session) -> dict:
@@ -88,9 +111,9 @@ def recompute(db: Session) -> dict:
         db.execute(delete(ListingCluster).where(ListingCluster.primary_listing_id.in_(stale)))
     db.flush()
 
-    # 2) 均价快照（两个口径）
+    # 2) 均价快照（两个口径；隔离挂牌一律排除）
     clusters = db.scalars(select(ListingCluster)).all()
-    listings = db.scalars(select(Listing)).all()
+    listings = db.scalars(select(Listing).where(Listing.quarantined.is_(False))).all()
     listing_by_id = {row.id: row for row in listings}
     block_stats_map: dict[str, dict] = {}
     naive: dict[str, list[float]] = {}
@@ -130,6 +153,10 @@ def recompute(db: Session) -> dict:
         stat_row.max_price = stats["max_price"]
         stat_row.updated_at = utcnow()
         block_stats_map[key] = stats
+    # 整个 block 的挂牌都被隔离 / 删除时，旧均价快照必须清掉，不能继续对外报数
+    stale_stats = [stat for key, stat in existing_stats.items() if key not in block_stats_map]
+    for stat in stale_stats:
+        db.delete(stat)
     db.flush()
 
     # 3) 价格工单（只在去重后的主房源上判定，保留人工复核态）
@@ -173,9 +200,18 @@ def recompute(db: Session) -> dict:
             flag.detected_at = utcnow()
     db.flush()
 
+    # 整源隔离挂牌的工单一律保留（隔离只在查询口径隐藏，不能删人工/历史工单）；
+    # 只清理「有效挂牌里已不再命中判定」的待处理工单。
+    quarantined_ids = {
+        row_id for (row_id,) in db.execute(
+            select(Listing.id).where(Listing.quarantined.is_(True))
+        ).all()
+    }
     stale_flags = [
         flag for flag in db.scalars(select(PriceFlag)).all()
-        if flag.listing_id not in flagged_ids and flag.review_status == ReviewStatus.PENDING.value
+        if flag.listing_id not in flagged_ids
+        and flag.listing_id not in quarantined_ids
+        and flag.review_status == ReviewStatus.PENDING.value
     ]
     for flag in stale_flags:
         db.delete(flag)

@@ -8,7 +8,12 @@ import { authStore } from '../stores/authStore';
 import { sourcesStore } from '../stores/sourcesStore';
 import { clustersStore } from '../stores/clustersStore';
 import { can } from '../constants/roles';
-import { INGEST_STATUS_LABELS, PLATFORM_LABELS } from '../constants/enums';
+import {
+  INGEST_STATUS_LABELS,
+  PLATFORM_LABELS,
+  QUARANTINE_REASON_LABELS,
+  SOURCE_BATCH_STATUS_LABELS,
+} from '../constants/enums';
 import { dateText, duration, yuan } from '../utils/format';
 import { errorMessage } from '../utils/errorMessage';
 import EmptyState from '../components/common/EmptyState';
@@ -16,7 +21,7 @@ import ErrorState from '../components/common/ErrorState';
 import LedgerTable from '../components/common/LedgerTable';
 import MetricStrip from '../components/common/MetricStrip';
 import StampTag from '../components/common/StampTag';
-import type { IngestRun, SourceRow } from '../types/models';
+import type { IngestRun, SourceBatch, SourceRow } from '../types/models';
 
 export default function Sources() {
   const auth = useSyncExternalStore(authStore.subscribe, authStore.getState);
@@ -33,6 +38,7 @@ export default function Sources() {
   const [busy, setBusy] = useState<string>('');
   const [drafts, setDrafts] = useState<Record<number, { frequency: string; rate_limit_per_min: string }>>({});
   const [openRun, setOpenRun] = useState<number | null>(null);
+  const [batchMap, setBatchMap] = useState<Record<number, SourceBatch[]>>({});
 
   async function load(force = false) {
     setLoading(true);
@@ -48,6 +54,22 @@ export default function Sources() {
     }
   }
 
+  async function openBatches(runId: number) {
+    if (openRun === runId) {
+      setOpenRun(null);
+      return;
+    }
+    setOpenRun(runId);
+    if (!batchMap[runId]) {
+      try {
+        const payload = await ingestApi.batches(runId);
+        setBatchMap((current) => ({ ...current, [runId]: payload.items }));
+      } catch (err) {
+        setError(err);
+      }
+    }
+  }
+
   useEffect(() => {
     load(true);
   }, []);
@@ -58,10 +80,17 @@ export default function Sources() {
     setBusy('all');
     try {
       const run = await ingestApi.run();
-      toast.ok(`采集完成：${run.items_fetched} 条 / 限流 ${run.throttled_count} 次 / 去重后 ${run.dedup_count} 套`);
+      const isolated = run.summary?.isolated_total ?? 0;
+      const replaced = run.summary?.replaced_total ?? 0;
+      toast.ok(
+        isolated
+          ? `采集完成：替换 ${replaced} 条 / 隔离 ${isolated} 条（隔离源不进均价、工单与导出）`
+          : `采集完成：${run.items_fetched} 条 / 限流 ${run.throttled_count} 次 / 去重后 ${run.dedup_count} 套`,
+      );
       clustersStore.invalidate();
       await load(true);
       setOpenRun(run.id);
+      setBatchMap((current) => ({ ...current, [run.id]: run.summary?.source_batches ?? [] }));
     } catch (err) {
       toast.error(errorMessage((err as { payload?: unknown }).payload, '采集失败'));
     } finally {
@@ -73,8 +102,17 @@ export default function Sources() {
     setBusy(`source-${source.id}`);
     try {
       const run = await sourcesApi.runOne(source.id);
-      toast.ok(`${source.name} 采集完成：${run.items_fetched} 条`);
+      const batch = run.summary?.source_batches?.[0];
+      toast.ok(
+        batch?.status === 'isolated'
+          ? `${source.name} 取数不完整已整源隔离：旧挂牌不参与均价/工单/导出`
+          : batch?.status === 'unchanged'
+            ? `${source.name} 快照与上批一致，重复运行跳过（未改写挂牌）`
+            : `${source.name} 采集完成：原子替换 ${batch?.replaced_count ?? run.items_fetched} 条`,
+      );
       await load(true);
+      setOpenRun(run.id);
+      setBatchMap((current) => ({ ...current, [run.id]: run.summary?.source_batches ?? [] }));
     } catch (err) {
       toast.error(errorMessage((err as { payload?: unknown }).payload, '采集失败'));
     } finally {
@@ -129,9 +167,15 @@ export default function Sources() {
   const metrics = [
     { k: '启用源', v: sources.filter((source) => source.enabled).length, unit: `/ ${sources.length}`, d: '分页 + 限流各自独立' },
     { k: '最近采集条数', v: latest ? latest.items_fetched : '—', unit: '条', d: latest ? `限流 ${latest.throttled_count} 次` : '还没跑过' },
-    { k: '最近耗时', v: latest ? duration(latest.duration_ms) : '—', d: latest ? `退避 ${latest.backoff_ms} ms` : '' },
+    {
+      k: '整源隔离',
+      v: latest?.summary?.isolated_total ?? 0,
+      unit: '条',
+      d: '不进均价 / 工单 / 导出',
+    },
+    { k: '原子替换', v: latest?.summary?.replaced_total ?? '—', unit: '条', d: latest?.summary?.recomputed === false ? '重复运行未重算' : '按本次快照落批' },
     { k: '去重结果', v: latest ? `${latest.duplicate_count}` : '—', unit: '组', d: latest ? `去重后 ${latest.dedup_count} 套` : '' },
-    { k: '价格工单', v: latest ? latest.flag_count : '—', unit: '件', d: '每次采集自动重算' },
+    { k: '价格工单', v: latest ? latest.flag_count : '—', unit: '件', d: '每次有效落批自动重算' },
   ];
 
   const sourceColumns = [
@@ -203,6 +247,11 @@ export default function Sources() {
           ) : (
             <span className="tiny muted">未跑</span>
           )}
+          {source.latest_batch ? (
+            <div style={{ marginTop: 4 }}>
+              <StampTag kind={source.latest_batch.status} label={SOURCE_BATCH_STATUS_LABELS[source.latest_batch.status] || source.latest_batch.status} />
+            </div>
+          ) : null}
           <div className="tiny muted">{source.last_run_at ? dateText(source.last_run_at) : '—'}</div>
         </div>
       ),
@@ -214,7 +263,10 @@ export default function Sources() {
       render: (source: SourceRow) => (
         <div>
           <div className="mono">{source.listing_count}</div>
-          <div className="tiny muted">最近入库 {source.last_run_items}</div>
+          <div className="tiny muted">
+            最近入库 {source.last_run_items}
+            {source.latest_batch?.status === 'isolated' ? ` · 隔离 ${source.latest_batch.isolated_count}` : ''}
+          </div>
         </div>
       ),
     },
@@ -295,7 +347,7 @@ export default function Sources() {
       label: '',
       align: 'right' as const,
       render: (run: IngestRun) => (
-        <button className="btn btn-sm btn-ghost" onClick={() => setOpenRun(openRun === run.id ? null : run.id)}>
+        <button className="btn btn-sm btn-ghost" onClick={() => openBatches(run.id)}>
           {openRun === run.id ? '收起' : '明细'}
         </button>
       ),
@@ -303,6 +355,7 @@ export default function Sources() {
   ];
 
   const activeRun = runs.find((run) => run.id === openRun) || null;
+  const activeBatches = activeRun ? batchMap[activeRun.id] ?? activeRun.summary?.source_batches ?? [] : [];
 
   return (
     <div className="stack fade-in">
@@ -362,6 +415,56 @@ export default function Sources() {
                 <span className="tiny muted">{activeRun.message}</span>
               </div>
               <div className="panel-body stack" style={{ gap: 12 }}>
+                {activeBatches.length ? (
+                  <div>
+                    <div className="eyebrow" style={{ marginBottom: 4 }}>
+                      逐源落批核对 · 收到 / 隔离 / 替换
+                      {activeRun.summary?.recomputed === false ? (
+                        <span className="plate" style={{ marginLeft: 8 }}>本批无落批变化，未触发重算</span>
+                      ) : null}
+                    </div>
+                    <div className="ledger-wrap">
+                      <table className="ledger" data-testid="source-batch-ledger">
+                        <thead>
+                          <tr>
+                            <th>来源</th>
+                            <th className="right">页（取/应）</th>
+                            <th className="right">收到</th>
+                            <th className="right">隔离</th>
+                            <th className="right">替换（新/更/删）</th>
+                            <th>结果 / 原因</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activeBatches.map((batch) => (
+                            <tr key={batch.id} className={batch.status === 'isolated' ? 'is-quarantined' : ''}>
+                              <td className="mono tiny">{batch.source_code}</td>
+                              <td className="num right">
+                                {batch.pages_fetched} / {batch.pages_expected || '—'}
+                              </td>
+                              <td className="num right">{batch.received_count}</td>
+                              <td className="num right">{batch.isolated_count || '—'}</td>
+                              <td className="num right">
+                                {batch.status === 'replaced'
+                                  ? `${batch.replaced_count}（${batch.created_count}/${batch.updated_count}/${batch.deleted_count}）`
+                                  : '—'}
+                              </td>
+                              <td>
+                                <StampTag kind={batch.status} label={SOURCE_BATCH_STATUS_LABELS[batch.status] || batch.status} />
+                                {batch.reason ? (
+                                  <div className="tiny muted" style={{ marginTop: 3 }}>
+                                    {QUARANTINE_REASON_LABELS[batch.reason] || batch.reason}
+                                  </div>
+                                ) : null}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="row" style={{ gap: 18 }}>
                   <div>
                     <div className="tiny muted">页面</div>

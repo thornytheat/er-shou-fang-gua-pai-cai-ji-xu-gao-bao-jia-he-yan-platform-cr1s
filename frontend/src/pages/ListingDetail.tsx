@@ -79,6 +79,7 @@ export default function ListingDetail() {
   const { listing, members, block, flag, price_series } = data;
   const canReview = can(role, 'flag:review');
   const canWrite = can(role, 'listing:write');
+  const isQuarantined = Boolean(listing.quarantined);
   const median = block?.median_price || null;
   const dedupMean = block?.dedup_mean || null;
   const naiveMean = block?.naive_mean || null;
@@ -93,8 +94,19 @@ export default function ListingDetail() {
         </button>
         <span className="plate">房源 #{listing.id}</span>
         <span className="plate">{listing.source_listing_no}</span>
+        {isQuarantined ? (
+          <StampTag kind="quarantined" label="整源隔离" title="所属来源本次取数不完整" />
+        ) : null}
         {listing.cluster_size > 1 ? <StampTag kind="dup" label={`同簇 ${listing.cluster_size} 条 / ${listing.platform_count} 个平台`} /> : null}
       </div>
+
+      {isQuarantined ? (
+        <div className="note-pin" data-testid="quarantine-banner" style={{ borderColor: 'var(--ochre)' }}>
+          <div className="eyebrow" style={{ marginBottom: 4, color: 'var(--ochre)' }}>整源隔离 · 该挂牌不参与任何有效口径</div>
+          所属来源本次采集取数不完整，旧挂牌原样保留可查，但<b>不进去重簇、均价、价格工单与行情导出</b>；
+          待该来源恢复完整采集并原子替换后，隔离自动解除。隔离期间不能改价或复核，避免人工结论挂到漂移数据上。
+        </div>
+      ) : null}
 
       <div className="panel">
         <div className="panel-body detail-head">
@@ -277,7 +289,7 @@ export default function ListingDetail() {
                     </div>
                   </div>
                   {flag.review_note ? <div className="tiny muted">复核备注：{flag.review_note}</div> : null}
-                  {canReview ? (
+                  {canReview && !isQuarantined ? (
                     <>
                       <label className="field">
                         <span>复核备注</span>
@@ -292,6 +304,8 @@ export default function ListingDetail() {
                         </button>
                       </div>
                     </>
+                  ) : isQuarantined ? (
+                    <div className="tiny muted">所属来源已整源隔离，恢复完整采集后才能复核（人工结论不得挂到漂移数据上）。</div>
                   ) : (
                     <div className="tiny muted">中介客户只读：复核动作由数据专员 / 研究组长完成。</div>
                   )}
@@ -318,13 +332,18 @@ export default function ListingDetail() {
                     className="input mono"
                     placeholder={listing.unit_price ? String(listing.unit_price) : '例如 58900'}
                     value={priceInput}
+                    disabled={isQuarantined}
                     onChange={(event) => setPriceInput(event.target.value.replace(/[^\d]/g, ''))}
                   />
                 </label>
-                <button className="btn btn-sm" disabled={busy} onClick={fixPrice}>
-                  提交修正并重算
+                <button className="btn btn-sm" disabled={busy || isQuarantined} onClick={fixPrice}>
+                  {isQuarantined ? '整源隔离中，禁止改价' : '提交修正并重算'}
                 </button>
-                <div className="tiny muted">修正会写审计日志，并触发该批次的中位/MAD 与工单重算。</div>
+                <div className="tiny muted">
+                  {isQuarantined
+                    ? '隔离期改价会被服务端拒绝（SOURCE_QUARANTINED）；恢复完整采集后自动解锁。'
+                    : '修正会写审计日志，并触发该批次的中位/MAD 与工单重算。'}
+                </div>
               </div>
             </div>
           ) : (
